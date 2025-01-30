@@ -112,7 +112,7 @@ with open(readme_path, 'w') as f:
 # Define the Neural Network
 input_size = 18
 output_size = 6
-NN_model = knode.KNODE(input_size, output_size, number_of_layers, hidden_layers, type_of_activation).to(device)
+NN_model = knode.KNODE(number_of_layers, hidden_layers, type_of_activation).to(device)
 
 # Define the Adam optimizer
 optimizer = optim.Adam(NN_model.parameters(), lr=learning_rate_scheduler[0], betas=(0.9, 0.999), eps=1e-8, weight_decay=L2_reg)

@@ -10,6 +10,69 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 use_RK4 = True
 Tdig = 0.004  # Digital sampling time
 
+# HERE YOU CAN DEFINE DIFFERENT SHAPES OF THE NN
+NNs = (
+    ((1, 1, 1, 0, 0, 0),(32,32),('ReLU')),     # NN_1
+    ((0, 0, 0, 1, 1, 1),(128),('LeakyReLU'))   # NN_2
+    # [o1, o2, o3, o4, 5, o6]
+    # How do I read this?
+    # This mask defines how many Neural Networks our model has.
+    # In our case we have 2 Neural Networks.
+    # The first NN is for the linear acceleration and the second NN is for the angular acceleration.
+    # The first element of each tuple is the mask for the input of the NN, it specifies which elements 
+    # of the output are involved.
+    # For example, the first NN has a mask of (1, 1, 1, 0, 0, 0), this means that the this NN is only
+    # connected to the first three elements of the output.
+    # The second element of each tuple is the number of hidden layers and the number of neurons in each hidden layer.
+    # The third element of each tuple is the activation function of each hidden layer.
+)
+
+NN_IN_OUT_mask = (
+    # TWIST
+    (
+        (1, 1, 1, 0, 0, 0),  # V_1
+        (1, 1, 1, 0, 0, 0),  # V_2
+        (1, 1, 1, 0, 0, 0),  # V_3
+        (0, 0, 0, 1, 1, 1),  # V_4
+        (0, 0, 0, 1, 1, 1),  # V_5
+        (0, 0, 0, 1, 1, 1),  # V_6
+    #  [o1,o2,o3,o4,o5,o6]
+    ),
+    # GAMMA
+    (
+        (1, 1, 1, 1, 1, 1),  # GAMMA_1
+        (1, 1, 1, 1, 1, 1),  # GAMMA_2
+        (1, 1, 1, 1, 1, 1),  # GAMMA_3
+        (1, 1, 1, 1, 1, 1),  # GAMMA_4
+        (1, 1, 1, 1, 1, 1),  # GAMMA_5
+        (1, 1, 1, 1, 1, 1),  # GAMMA_6
+    #  [o1,o2,o3,o4,o5,o6]
+    )
+    # BATTERY CHARGE
+    # (
+    #   (1, 1, 1, 1, 1, 1),  # B_1
+    # )
+    # [o1,o2,o3,o4,o5,o6]
+)
+# How do I read this?
+# This mask defines how the inputs are connected to the outputs in the neural network.
+# Each row corresponds to an output dimension, and each column corresponds to an input dimension.
+# A value of 1 indicates a connection, while a value of 0 indicates no connection.
+# Why is this useful?
+# This allow us to define a causal relationship between the inputs and the outputs of the neural network.
+# For example: if we know that the linear velocity of the MRAV is only affected by the linear acceleration,
+# then we can set the mask of the linear velocity to only have connections with the linear acceleration.
+
+output_size = len(NN_IN_OUT_mask[0][0])
+input_size = 0
+for input in NN_IN_OUT_mask:
+    input_size += len(input)
+output_size = len(NN_IN_OUT_mask[0][0]) 
+input_size = 0
+for input in NN_IN_OUT_mask:
+    input_size += len(input)
+#print(f"Input size: {input_size}, Output size: {output_size}")
+
 ###############################################################
 # Set up model parameters of f_tilde, the First principle model
 ###############################################################
@@ -293,7 +356,7 @@ def reset_Adam_optimizer(optimizer, new_lr):
     return optimizer
 
 class KNODE(nn.Module):
-    def __init__(self, input_size, output_size, number_of_layers, hidden_layers, type_of_activation,gating_enabled=False):
+    def __init__(self, number_of_layers, hidden_layers, type_of_activation):
         super(KNODE, self).__init__()
         self.number_of_layers = number_of_layers
         self.hidden_layers = hidden_layers
@@ -304,12 +367,12 @@ class KNODE(nn.Module):
         self.m_hat = mm
         self.J_hat = JJ
         self.GG_hat = GG
-        self.gating_enabled = gating_enabled
 
         # Separate layers for the first three and last three elements
         self.linear_acc_layers = self._build_layers(3+3+6, hidden_layers, 3, type_of_activation)
         self.angular_acc_layers = self._build_layers(3+3+6, hidden_layers, 3, type_of_activation)
         
+    # OLD METHOD
     def _build_layers(self, input_size, hidden_layers, output_size, type_of_activation):
         layers = nn.ModuleList()
         for i in range(self.number_of_layers):
@@ -320,7 +383,41 @@ class KNODE(nn.Module):
             layers.append(getattr(nn, type_of_activation[i])())
         layers.append(nn.Linear(hidden_layers[-1], output_size))  # Final layer
         return nn.Sequential(*layers)
+
+    # NEW METHOD
+    #     for NN in range(len(NNs)):
+    #         print(f"NN num:{NN}")
+    #         # Read from the NN_COUPLED_OUT_mask the output mask
+    #         NN = NNs[NN]
+    #         print(f"NN mask: {NN[0]}")
+    #         # Define the layers
+    #         setattr(self, f'NN_{NN}', self._build_layers(NN, NN_IN_OUT_mask))
+
+    # def _build_layers(self, NN, NN_IN_OUT_mask):
+    #     layers = nn.ModuleList()
+
+    #     NN_mask = NN[0]
+    #     NN_hidden_layers = NN[1]
+    #     NN_type_of_activation = NN[2]
         
+    #     # copy the input mask
+    #     MASKED_NN_IN_OUT_mask = torch.tensor(NN_IN_OUT_mask)
+
+    #     for input in MASKED_NN_IN_OUT_mask:
+    #         # Apply the NN mask to the input mask
+    #         #print(f"Input:        {input.tolist()}")
+    #         masked_input = input 
+    #         for vector_idx in range(len(input)):
+    #             vector = input[vector_idx]
+    #             for element_idx in range(len(vector)):
+    #                 NN_mask_element = NN_mask[element_idx]
+    #                 if NN_mask_element == 0:
+    #                     masked_input[vector_idx][element_idx] = 0
+    #         #print(f"Input masked: {masked_input.tolist()}")
+        
+    #     print(f"Masked NN: {MASKED_NN_IN_OUT_mask.tolist()}")
+
+
 
     def forward(self, v_B_t, gamma_t, w_B_ext_t):
         # Split the input vectors into their respective parts
@@ -575,3 +672,6 @@ class KNODE(nn.Module):
         )
         model.load_state_dict(checkpoint['model_state_dict'])
         return model
+    
+# TEST 
+model = KNODE(3, [10, 10, 10], ['ReLU', 'ReLU', 'ReLU'])

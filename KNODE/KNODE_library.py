@@ -86,10 +86,17 @@ tilt = 0.3490658 # Real = 0.3490658
 l = 0.38998 # Real = 0.38998
 c_t = 0.0203  # Real =  0.0203
 c_f = 11.75e-4 # Real = 11.75e-4
-dumping_factor = 0 # Real = 0
 
 # parameter = parameter + (parameter * error percentage)
 # uncomment the correct section
+
+# PERFECT
+mm_error = 0.0
+JJ_error = 0.0
+tilt_error = 0.0
+l_error = 0.0
+c_t_error = 0.0
+c_f_error = 0.0
 
 # # M type error
 # mm_error = -2.5 / 100
@@ -127,12 +134,12 @@ dumping_factor = 0 # Real = 0
 # dumping_factor = 0.1
 
 # # MGD type errors
-mm_error = -2.5 / 100
-JJ_error = 3.5/100
-tilt_error = 5.0 / 100
-l_error = -2.5 / 100
-c_t_error = -20 / 100
-c_f_error = 20 / 100
+# mm_error = -2.5 / 100
+# JJ_error = 3.5/100
+# tilt_error = 5.0 / 100
+# l_error = -2.5 / 100
+# c_t_error = -20 / 100
+# c_f_error = 20 / 100
 # dumping_factor = 0.1
 
 # calculate the wrong parameters
@@ -223,7 +230,7 @@ def MRAV_known_dynamics(v_B_t, R_WB_t, gamma_t, w_B_ext_t):
     dR_WB = R_WB_t @ skew_symmetric_matrix(v_B_t[3:6])
 
     # Compute the systems dynamics
-    dv_B = M_B_inv @ (TT @ (GG @ gamma_t - dumping_factor * v_B_t + w_B_ext_t) - C_B @ v_B_t  + w_g)
+    dv_B = M_B_inv @ (TT @ (GG @ gamma_t + w_B_ext_t) - C_B @ v_B_t  + w_g)
 
     return dv_B, dR_WB
 
@@ -272,7 +279,7 @@ def one_step_ahead_prediction(v_B, R_WB, gamma, w_B_ext, alpha, T_s, t_index):
         x_hat[kk,:] = x_hat_t + dv_B * Tdig
         R_WB_hat[kk,:,:] = R_WB_t + dR_WB * Tdig
 
-    if 0:
+    if 1:
         os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
         fig, axs = plt.subplots(6, 1, sharex=True, figsize=(15, 10))
         for j in range(6):
@@ -285,7 +292,46 @@ def one_step_ahead_prediction(v_B, R_WB, gamma, w_B_ext, alpha, T_s, t_index):
         plt.show()
     return x_hat, T_pred
 
-def L_theta_first_principle(v_B, R_WB, gamma, w_B_ext, alpha, T_sampled, N_batch_train = 0):
+def inv_dyn(v_B, dv_B, R_WB, gamma, w_B_ext, alpha, T_s, t_index):
+
+    # Initialize the prediction variables
+    w_hat = torch.zeros((alpha,6), dtype=torch.float32).to(device)
+    T_pred = torch.zeros((alpha), dtype=torch.float32).to(device)
+    
+    # Extract the inputs od the inv_dyn problem
+    T_pred = T_s[t_index:t_index+alpha]
+    gamma = gamma[t_index:t_index+alpha]
+    v_B = v_B[t_index:t_index+alpha]
+    dv_B = dv_B[t_index:t_index+alpha]
+    R_WB = R_WB[t_index:t_index+alpha]
+
+    # Inv. dyn. problem
+    for kk in range(0,alpha):
+        gamma_t = gamma[kk]
+        v_B_t = v_B[kk]
+        dv_B_t = dv_B[kk]
+        R_WB_t = R_WB[kk]
+        C_B_t = torch.block_diag(torch.zeros((3, 3), dtype=torch.float32, device=device), skew_symmetric_matrix(v_B_t[3:6]) @ JJ).to(device)
+        TT = torch.block_diag(R_WB_t, torch.eye(3, dtype=torch.float32, device=device)).to(device)
+        TT_inv = torch.inverse(TT)
+        w_g_t = torch.tensor([0, 0, -mm * gg, 0, 0, 0], dtype=torch.float32, device=device)
+
+        w_hat[kk,:] = -GG @ gamma_t + TT_inv @ ( M_B @ dv_B_t + C_B_t @ v_B_t - w_g_t)
+
+    if 1:
+        os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+        fig, axs = plt.subplots(6, 1, sharex=True, figsize=(15, 10))
+        for j in range(6):
+            axs[j].plot(T_s.cpu().detach().numpy(), w_B_ext[:, j].cpu().detach().numpy(),color='b',label='Real')
+            axs[j].plot(T_pred.cpu().detach().numpy(), w_hat[:,j].cpu().detach().numpy(),color='r',label='Predicted')
+            axs[j].set_ylabel(f'w_B [{j}]')
+        plt.suptitle(f'w_B Real and Predicted at time {T_pred[0]:.2f}, alpha = {alpha}, dt_s = {Tdig}, dt_dig = {Tdig}')
+        plt.tight_layout()
+        plt.legend()
+        plt.show()
+    return w_hat, T_pred
+
+def L_theta_first_principle(v_B, dv_B, R_WB, gamma, w_B_ext, alpha, T_sampled, N_batch_train = 0):
     L_value = 0.0
     N = T_sampled.shape[0]
     index_list = range(N-alpha) if N_batch_train == 0 else torch.randperm(N-alpha)[:N_batch_train]
@@ -297,12 +343,23 @@ def L_theta_first_principle(v_B, R_WB, gamma, w_B_ext, alpha, T_sampled, N_batch
         # Compute the prediction of the twist
         v_B_hat,T_pred = one_step_ahead_prediction(v_B, R_WB, gamma, w_B_ext,alpha,T_sampled,index_T_sampled)
 
+        # Compute the inverse dynamics
+        w_B_hat,_ = inv_dyn(v_B, dv_B, R_WB, gamma, w_B_ext,alpha,T_sampled,index_T_sampled)
+
         # Extract the ground-truth twist
         v_B_GT_out = v_B[index_T_sampled:index_T_sampled+alpha+1]
 
+        # Extract the ground-truth external wrench
+        w_B_GT_out = w_B_ext[index_T_sampled:index_T_sampled+alpha]
+
         # Compute the prediction error
         F_theta = torch.sum(torch.norm(v_B_hat[1:] - v_B_GT_out[1:], dim=1)**2)/alpha
-        L_value += F_theta 
+
+        # Compute the inverse dynamics error
+        inv_theta = torch.sum(torch.norm(w_B_hat - w_B_GT_out, dim=1)**2)/alpha
+
+        # Compute the loss
+        L_value += F_theta + inv_theta
 
         if 0:
             for index_T_pred in range(1,alpha+1):
@@ -417,8 +474,6 @@ class KNODE(nn.Module):
         
     #     print(f"Masked NN: {MASKED_NN_IN_OUT_mask.tolist()}")
 
-
-
     def forward(self, v_B_t, gamma_t, w_B_ext_t):
         # Split the input vectors into their respective parts
         dp_BW, omega_BB = v_B_t[:3], v_B_t[3:]
@@ -439,9 +494,10 @@ class KNODE(nn.Module):
     def f_hat(self, v_B_hat_t, R_WB_t, gamma_t, w_B_ext_t):
         # Compute the system dynamics 
         TT = torch.block_diag(R_WB_t, torch.eye(3, dtype=torch.float32, device=device)).to(device)
-        dv_B_delta_NN = self.forward(v_B_hat_t, gamma_t, w_B_ext_t) 
+        rho = self.forward(v_B_hat_t, gamma_t, w_B_ext_t) 
         dv_B_model, dR_WB_hat_t = MRAV_known_dynamics(v_B_hat_t, R_WB_t, gamma_t, w_B_ext_t)
-        dv_B_hat_t = dv_B_model + M_B_inv @ TT @ dv_B_delta_NN
+        rho_theta = M_B_inv @ TT @ rho # The output is expressed in the body frame
+        dv_B_hat_t = dv_B_model + rho_theta
         return dv_B_hat_t, dR_WB_hat_t
     
     def f_hat_RK4(self, v_B_hat_t, R_WB_t, gamma_t, w_B_ext_t):
@@ -497,8 +553,51 @@ class KNODE(nn.Module):
             plt.legend()
             plt.show()
         return x_hat, T_pred
+    
+    def inv_dyn(self, v_B, dv_B, R_WB, gamma, w_B_ext, alpha, T_s, t_index):
 
-    def L_theta(self, v_B, R_WB, gamma, w_B_ext, alpha, T_sampled, N_batch_train = 0.0):
+        # Initialize the prediction variables
+        w_hat = torch.zeros((alpha,6), dtype=torch.float32).to(device)
+        T_pred = torch.zeros((alpha), dtype=torch.float32).to(device)
+        
+        # Extract the inputs od the inv_dyn problem
+        T_pred = T_s[t_index:t_index+alpha]
+        gamma = gamma[t_index:t_index+alpha]
+        v_B = v_B[t_index:t_index+alpha]
+        dv_B = dv_B[t_index:t_index+alpha]
+        R_WB = R_WB[t_index:t_index+alpha]
+
+        # Inv. dyn. problem
+        for kk in range(0,alpha):
+            gamma_t = gamma[kk]
+            v_B_t = v_B[kk]
+            dv_B_t = dv_B[kk]
+            R_WB_t = R_WB[kk]
+            C_B_t = torch.block_diag(torch.zeros((3, 3), dtype=torch.float32, device=device), skew_symmetric_matrix(v_B_t[3:6]) @ JJ).to(device)
+            TT = torch.block_diag(R_WB_t, torch.eye(3, dtype=torch.float32, device=device)).to(device)
+            TT_inv = torch.inverse(TT)
+            w_g_t = torch.tensor([0, 0, -mm * gg, 0, 0, 0], dtype=torch.float32, device=device)
+
+            # Compute the residual wrench
+            w_B_ext_t = w_B_ext[t_index+kk]
+            rho = self.forward(v_B_t, gamma_t, w_B_ext_t)
+
+            w_hat[kk,:] = -GG @ gamma_t + TT_inv @ ( M_B @ dv_B_t + C_B_t @ v_B_t - w_g_t - rho)
+
+        if 0:
+            os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+            fig, axs = plt.subplots(6, 1, sharex=True, figsize=(15, 10))
+            for j in range(6):
+                axs[j].plot(T_s.cpu().detach().numpy(), w_B_ext[:, j].cpu().detach().numpy(),color='b',label='Real')
+                axs[j].plot(T_pred.cpu().detach().numpy(), w_hat[:,j].cpu().detach().numpy(),color='r',label='Predicted')
+                axs[j].set_ylabel(f'w_B [{j}]')
+            plt.suptitle(f'w_B Real and Predicted at time {T_pred[0]:.2f}, alpha = {alpha}, dt_s = {Tdig}, dt_dig = {Tdig}')
+            plt.tight_layout()
+            plt.legend()
+            plt.show()
+        return w_hat, T_pred
+    
+    def L_theta(self, v_B, dv_B, R_WB, gamma, w_B_ext, alpha, T_sampled, N_batch_train = 0.0):
         """
         Computes the function L(theta).
 
@@ -537,12 +636,23 @@ class KNODE(nn.Module):
             # Compute the prediction of the twist
             v_B_hat,T_pred = self.one_step_ahead_prediction(v_B, R_WB, gamma, w_B_ext, alpha, T_sampled, index_T_sampled)
 
+            # Compute the inverse dynamics
+            w_B_hat,_ = self.inv_dyn(v_B, dv_B, R_WB, gamma, w_B_ext, alpha, T_sampled, index_T_sampled)
+
             # Extract the ground-truth twist
             v_B_GT_out = v_B[index_T_sampled:index_T_sampled+alpha+1]
 
+            # Extract the ground-truth external wrench
+            w_B_GT_out = w_B_ext[index_T_sampled:index_T_sampled+alpha]
+
             # Compute the prediction error
             F_theta = torch.sum(torch.norm(v_B_hat[1:] - v_B_GT_out[1:], dim=1)**2)/alpha
-            L_value += F_theta 
+
+            # Compute the inverse dynamics error
+            inv_theta = torch.sum(torch.norm(w_B_hat - w_B_GT_out, dim=1)**2)/alpha
+
+            # Compute the loss
+            L_value += F_theta + inv_theta
 
             if 0:
                 for index_T_pred in range(1,alpha+1):
@@ -567,7 +677,7 @@ class KNODE(nn.Module):
                     plt.show()
             
         return  L_value / len(index_list)
-        
+  
     def L_Jacobian_reg(self, v_B, gamma, w_B_ext, lamda_reg, batch_size):
         if lamda_reg == 0.0:
             return torch.tensor(0.0)

@@ -21,7 +21,7 @@ input_noise = 0 # Noise to add to the GT to avoid numerical error
 # Set Hyperparameters for the Optimization Problem
 percentage_train_dataset = 0.8 # Percentage of the dataset to use for training
 Batch_pred_error = 0.01 # Percentage of the train data to use for the prediction error use 0 to use all the data in sequence 1 to use all the data in random order
-list_of_alphas = [1] # List of alphas to train the model
+list_of_alphas = [1,10] # List of alphas to train the model
 learning_rate_scheduler = [1e-2,1e-2] # This is used in the Adam optimizer
 epochs_patient = 200 # Number of epochs to wait before increasing the look ahead
 range_average = 100 # Number of epochs to average the loss
@@ -69,6 +69,7 @@ for i in range(0,num_experiments):
 # Extract columns
 T_CSV = [None]*num_experiments
 v_B_CSV = [None]*num_experiments
+dv_B_CSV = [None]*num_experiments
 gamma_CSV = [None]*num_experiments
 w_B_ext_CSV = [None]*num_experiments
 R_WB_CSV = [None]*num_experiments
@@ -77,6 +78,7 @@ for i in range(0,num_experiments):
     v_B_CSV[i] = data[i].iloc[:, 1:7].values  # 6D twist of the base
     gamma_CSV[i] = data[i].iloc[:, 7:13].values  # 6D thrust inputs
     w_B_ext_CSV[i] = data[i].iloc[:, 13:19].values  # 6D wrench
+    dv_B_CSV[i] = data[i].iloc[:, 19:25].values  # 6D acceleration of the base
     R_WB_1_raw = data[i].iloc[:, 25:28].values  # First row of rotation matrix
     R_WB_2_raw = data[i].iloc[:, 28:31].values  # Second row of rotation matrix
     R_WB_3_raw = data[i].iloc[:, 31:34].values  # Third row of rotation matrix
@@ -85,12 +87,14 @@ for i in range(0,num_experiments):
 ## Convert to torch.Tensor and move to GPU 
 T_sampled = [None]*num_experiments
 v_B = [None]*num_experiments
+dv_B = [None]*num_experiments
 gamma = [None]*num_experiments
 w_B_ext = [None]*num_experiments
 R_WB = [None]*num_experiments
 for i in range(0,num_experiments):
     T_sampled[i] = torch.tensor(T_CSV[i], dtype=torch.float32).to(device)
     v_B[i] = torch.tensor(v_B_CSV[i], dtype=torch.float32).to(device)
+    dv_B[i] = torch.tensor(dv_B_CSV[i], dtype=torch.float32).to(device)
     gamma[i] = torch.tensor(gamma_CSV[i], dtype=torch.float32).to(device)
     w_B_ext[i] = torch.tensor(w_B_ext_CSV[i], dtype=torch.float32).to(device)
     R_WB[i] = torch.tensor(R_WB_CSV[i], dtype=torch.float32).to(device)
@@ -106,12 +110,10 @@ with open(readme_path, 'w') as f:
     f.write(f"## Hyperparameters\n")
     f.write(f"Number of layers: {number_of_layers} \nHidden layers: {hidden_layers} \nType of activation: {type_of_activation} \nLearning rate scheduler: {learning_rate_scheduler}\nAmount of noise added to the input: {input_noise}\nPercentage of the dataset used for training: {percentage_train_dataset}\nBatch size for the prediction error: {Batch_pred_error}\nList of alphas: {list_of_alphas}\nEpochs patient: {epochs_patient}\nMax epochs: {max_epochs}\nL2 regularization: {L2_reg}\n")
     f.write(f"## Model parameters\n")
-    f.write(f"m: {knode.mm}\nJ: {knode.JJ}\ntilt: {knode.tilt}\nl: {knode.l}\nc_t: {knode.c_t}\nc_f: {knode.c_f}\ndumping: {knode.dumping_factor}\n")
+    f.write(f"m: {knode.mm}\nJ: {knode.JJ}\ntilt: {knode.tilt}\nl: {knode.l}\nc_t: {knode.c_t}\nc_f: {knode.c_f}\n")
     f.write(f"## Training\n")
 
 # Define the Neural Network
-input_size = 18
-output_size = 6
 NN_model = knode.KNODE(number_of_layers, hidden_layers, type_of_activation).to(device)
 
 # Define the Adam optimizer
@@ -162,8 +164,8 @@ for look_ahead in list_of_alphas:
                 N_batch_train = int(Batch_pred_error*N_val+1)
 
                 # Compute the prediction error
-                Pred_error = NN_model.L_theta(v_B[i][N_train:], R_WB[i][N_train:], gamma[i][N_train:], w_B_ext[i][N_train:], look_ahead, T_sampled[i][N_train:], N_batch_train=N_batch_train)
-                Pred_error_FP = knode.L_theta_first_principle(v_B[i][N_train:], R_WB[i][N_train:], gamma[i][N_train:], w_B_ext[i][N_train:], look_ahead, T_sampled[i][N_train:], N_batch_train=N_batch_train)                
+                Pred_error = NN_model.L_theta(v_B[i][N_train:], dv_B[i][N_train:], R_WB[i][N_train:], gamma[i][N_train:], w_B_ext[i][N_train:], look_ahead, T_sampled[i][N_train:], N_batch_train=N_batch_train)
+                Pred_error_FP = knode.L_theta_first_principle(v_B[i][N_train:], dv_B[i][N_train:], R_WB[i][N_train:], gamma[i][N_train:], w_B_ext[i][N_train:], look_ahead, T_sampled[i][N_train:], N_batch_train=N_batch_train)                
                 loss_list.append(Pred_error)
                 loss_list_FP.append(Pred_error_FP)
             
@@ -192,7 +194,7 @@ for look_ahead in list_of_alphas:
             N_batch_train = int(Batch_pred_error*N_train+1)
             
             # Compute the prediction error
-            Pred_error = NN_model.L_theta(v_B[i][:N_train], R_WB[i][:N_train], gamma[i][:N_train], w_B_ext[i][:N_train], look_ahead, T_sampled[i][:N_train], N_batch_train=N_batch_train) 
+            Pred_error = NN_model.L_theta(v_B[i][:N_train], dv_B[i][:N_train], R_WB[i][:N_train], gamma[i][:N_train], w_B_ext[i][:N_train], look_ahead, T_sampled[i][:N_train], N_batch_train=N_batch_train) 
 
             # Compute the total loss for this experiment
             loss_list.append(Pred_error)

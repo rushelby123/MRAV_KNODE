@@ -25,7 +25,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #######################################
 # Define the simulation informations
 #######################################
-test_or_training_data = True # True for test data, False for training data (used to name the folder)
+test_or_training_data = False # True for test data, False for training data (used to name the folder)
 folder_name = 'data' # Name of the folder where the data will be saved
 this_file_path = os.path.dirname(os.path.abspath(__file__)) 
 type_of_solver = 'RK4' # Type of solver to use for the simulation, can be 'FE', 'RK4' 
@@ -48,8 +48,8 @@ M_B = torch.block_diag(mm * torch.eye(3, dtype=torch.float32, device=device), JJ
 M_B_inv = torch.linalg.inv(M_B)  # Inverse of the inertia matrix
 GG = lib.ComputeAllocation(c_f, c_t, l, tilt)  # Allocation matrix of the MRAV
 GG_inv = torch.linalg.inv(GG)  # Pseudo inverse of the allocation matrix
-d1 = 0.001 # Dumping factor for the friction of the rotors
-d2 = 0.001 # Dumping factor for the air friction
+d1 = 0.0 # Dumping factor for the friction of the rotors
+d2 = 0.0 # Dumping factor for the air friction
 
 #######################################
 # Define the control parameters

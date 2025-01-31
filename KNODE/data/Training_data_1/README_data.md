@@ -23,8 +23,8 @@ tensor([[ 0.0000e+00,  2.9620e-01, -2.9620e-01, -2.9900e-08,  2.9620e-01,
          -3.1377e+00],
         [-1.6101e+01,  1.6101e+01, -1.6101e+01,  1.6101e+01, -1.6101e+01,
           1.6101e+01]], device='cuda:0')
-Dumping factor for the friction of the rotors: 0.001
-Dumping factor for the air friction: 0.001
+Dumping factor for the friction of the rotors: 0.0
+Dumping factor for the air friction: 0.0
 Thrust coefficient: 0.001175
 Torque coefficient: 0.0203
 Distance between the center of mass and the propellers: 0.38998 m

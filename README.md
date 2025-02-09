@@ -95,12 +95,6 @@ To use this code, follow these steps:
 - NumPy
 - Matplotlib
 
-## Installation
-To install required libraries, run:
-```sh
-pip install -r requirements.txt
-```
-
 ## Contact
 For questions or issues, please contact **Gabriele Ruscelli** at gabrieleruscelli@gmail.com.
 

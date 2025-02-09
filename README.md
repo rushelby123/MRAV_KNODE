@@ -1,7 +1,7 @@
 # KNODE Wrench Estimation Framework
 
 ## Description
-This repository contains the training and testing pipeline for KNODE in the wrench estimation framework. The primary library used for the development of the KNODE model is PyTorch.
+This repository contains the training and testing pipeline for KNODE in the wrench estimation framework. The primary library used for the development of the KNODE model is PyTorch. For a deep theoretical background please refer to https://it.overleaf.com/read/fwhwjmkdpdxx#7ae2d0 .
 
 ## Project Structure
 
